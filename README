@@ -1,48 +1,38 @@
-KS_MayaSmartRename - Maya Bulk Rename Tool
-==============================================
+KS_SmartRename - Unity Editor Bulk Rename Tool
+===============================================
 
 What is this?
 -------------
-KS_MayaSmartRename is a Maya utility for bulk renaming scene objects using a
-safe, preview-first workflow. It is designed to work with joints, transforms,
-controls, locators, meshes, and most named Maya nodes.
+KS_SmartRename is a Unity Editor utility for bulk renaming assets and
+GameObjects using a chainable operation stack. It provides a live two-column
+preview before any changes are applied, works on Project window and Hierarchy
+selections simultaneously, and uses Unity's AssetDatabase API so all GUID
+references and serialized connections are preserved after rename.
 
-The tool was created as the Maya counterpart to KS_SmartRename for Unity, but
-focused around common rigging and animation-pipeline naming workflows inside
-Maya.
+The tool was created to replace the workflow of renaming assets outside of
+Unity with PowerRename or similar tools, which breaks asset references and
+causes Addressables address mismatches that require manual correction.
 
-KS_MayaSmartRename currently supports three rename modes:
+KS_SmartRename performs the following operations:
 
-- Sequential Rename
-- Search / Replace
-- Prefix / Suffix Only
-
-The tool provides a live preview before any changes are applied, allows items
-to be manually reordered, validates generated names before renaming, and wraps
-the rename operation in a single Maya undo chunk.
-
-
-What does it do?
-----------------
-
-KS_MayaSmartRename performs the following operations:
-
-- Loads the current Maya selection into a rename table
-- Adds additional selected objects without clearing the current list
-- Supports manual rename ordering with Move Up, Move Down, and Reverse
-- Builds a live preview showing Current Name -> Preview Name
-- Allows individual rows to be enabled or disabled before applying
-- Applies sequential numbering based on the visible tool order
-- Supports Search / Replace with plain text, regex, case-sensitive, and
-  whole-word options
-- Supports adding a prefix and/or suffix while preserving the current name
-- Detects invalid Maya names before applying
-- Detects duplicate names within the batch
-- Warns when a generated name already exists in the scene
-- Copies valid preview names to the clipboard
-- Selects highlighted table rows back in Maya
-- Saves and loads rename settings from the Maya user preferences folder
-- Applies renames inside one Maya undo chunk
+- Renames assets using AssetDatabase.RenameAsset (preserves GUIDs and all
+  serialized references)
+- Renames GameObjects using Undo.RecordObject (fully undoable via Ctrl+Z)
+- Renames folders using AssetDatabase.RenameAsset
+- Chains multiple rename operations in order: Search/Replace, Add Prefix,
+  Add Suffix, and Number, each applied to the output of the previous
+- Builds a live two-column preview (Original / Renamed) before applying,
+  with changed characters highlighted in blue and unchanged characters in green
+- Detects name collisions within the batch and flags them as errors before
+  any rename is attempted
+- Filters the preview list by asset type (.anim, .prefab, .mat, etc.),
+  GameObject, or Folder
+- Optionally syncs the Addressables address string when renaming a registered
+  asset (reflection-based, no project settings change required)
+- Warns before applying asset renames since they cannot be undone via Ctrl+Z
+- Applies silently for GameObject-only batches since those are fully undoable
+- Tooltips on every control, including a regex reference table and whole-word
+  explanation on the relevant toggles
 
 
 How do I use it?
@@ -51,435 +41,265 @@ How do I use it?
 Setup
 -----
 
-1. Place KS_MayaSmartRename.py in your Maya scripts folder.
+1. Place KS_SmartRename.cs anywhere inside your Unity project's Assets folder.
+   An Editor subfolder is recommended but not required. The #if UNITY_EDITOR
+   guard at the top of the file ensures it never compiles into a build
+   regardless of where it is placed.
 
-   Example:
+2. Open the tool from the Unity menu bar:
 
-      C:/Users/<username>/Documents/maya/2026/scripts/
+      Tools > KS > Smart Rename
 
-2. Open Maya and run the tool from the Script Editor:
+   Or right-click any selection:
 
-      import importlib
-      import KS_MayaSmartRename
-      importlib.reload(KS_MayaSmartRename)
-      KS_MayaSmartRename.show()
+      Project window  -- right-click > KS Smart Rename
+      Hierarchy       -- right-click > KS Smart Rename
 
-   The reload version is recommended while actively editing the script.
+3. Select the assets or GameObjects you want to rename. The preview list
+   updates immediately to reflect the current selection. You can change
+   the selection while the window is open and it will update.
 
 
-Selection
----------
+Operations
+----------
 
-The Selection section is where you control which Maya objects are included in
-the rename operation and in what order.
+The tool uses a stack of operations applied in order from top to bottom.
+Each operation receives the output of the one above it.
 
-Buttons:
+The window opens with a single Search/Replace operation by default.
 
-   Load Current Selection
-      Clears the tool list and loads the current Maya selection.
+Adding operations:
 
-   Add Selected
-      Adds the current Maya selection to the existing list. Objects already in
-      the list are skipped.
+   Click any of the + buttons in the Operations header row to add a new
+   operation of that type to the bottom of the stack:
 
-   Remove
-      Removes the highlighted rows from the tool list. This does not delete
-      anything from the Maya scene.
+      + Search/Replace  -- find and replace a substring
+      + Prefix          -- prepend text to the name
+      + Suffix          -- append text to the name
+      + Number          -- append or prepend a sequential number
 
-   Clear
-      Clears all rows from the tool list. This does not affect the scene.
+Each operation card has:
 
-   Select Rows in Maya
-      Selects the highlighted table rows in Maya. If no rows are highlighted,
-      all enabled rows are selected instead.
+   - A toggle on the left to enable or disable it without removing it
+   - Arrow buttons (▲ ▼) to reorder it in the stack
+   - An X button to remove it
 
-   Move Up
-      Moves the selected row up in the rename order.
-
-   Move Down
-      Moves the selected row down in the rename order.
-
-   Reverse
-      Reverses the full list order. This is useful for joint chains selected
-      from tip to root instead of root to tip.
-
-The rename order matters most in Sequential Rename mode because the numbering
-is assigned based on the enabled item order in the tool list.
-
-
-Preview Table
--------------
-
-The preview table shows the current rename state for every loaded item.
-
-Columns:
-
-   Use
-      Checked rows are included when Apply Rename is pressed. Unchecked rows
-      are left unchanged.
-
-   Type
-      The Maya node type, such as joint, transform, mesh, locator, etc.
-
-   Current Name
-      The current short name of the Maya object.
-
-   Preview Name
-      The name that will be applied if the row is enabled and valid.
-
-   Status
-      Shows whether the row will be renamed or if there is an issue.
-
-Common status messages:
-
-   Will rename
-      The row is enabled, the preview name is different, and no error was found.
-
-   Invalid Maya characters
-      The preview name contains characters that are not allowed by the tool's
-      Maya-safe naming validation.
-
-   Cannot start with number
-      Maya node names should not start with a number. Add a prefix or use a
-      different number placement.
-
-   Duplicate in batch
-      Two or more enabled rows are trying to use the same new name.
-
-   Name exists in scene
-      A node with the generated name already exists in the scene.
-
-
-Rename Modes
-------------
-
-Sequential Rename
------------------
-
-Sequential Rename creates a new name for every enabled row using a base name,
-optional prefix, optional suffix, and optional numbering.
-
-This is the main mode for joint chains and rigging workflows.
-
-Default convention:
-
-      Spine_01_JNT
-      Spine_02_JNT
-      Spine_03_JNT
-
-Fields:
-
-   Prefix
-      Text added before the generated name.
-
-      Example:
-         Prefix L_
-         Result L_Spine_01_JNT
-
-   Base Name
-      The main name used for every enabled object.
-
-      Example:
-         Base Name Spine
-         Result Spine_01_JNT, Spine_02_JNT, Spine_03_JNT
-
-      Spaces and unsafe characters are cleaned into Maya-safe underscores.
-
-   Suffix
-      Text added after the generated name.
-
-      Common examples:
-         _JNT
-         _CTRL
-         _GEO
-         _LOC
-         _DRV
-
-   Enable Numbering
-      Turns sequential numbering on or off.
-
-      On:
-         Spine_01_JNT, Spine_02_JNT, Spine_03_JNT
-
-      Off:
-         Every enabled item previews the same base name, which will usually
-         create duplicate warnings unless the name is unique.
-
-   Start
-      The number assigned to the first enabled item.
-
-      Example:
-         Start 1 -> Spine_01_JNT
-         Start 5 -> Spine_05_JNT
-
-   Step
-      How much the number increases per item.
-
-      Example:
-         Start 1, Step 1 -> 01, 02, 03
-         Start 1, Step 5 -> 01, 06, 11
-
-   Padding
-      Minimum number of digits in the number.
-
-      Padding 2:
-         01, 02, 10
-
-      Padding 3:
-         001, 002, 010
-
-   Separator
-      Text inserted between the base name and the number. Underscore is
-      recommended.
-
-      Example:
-         Base Spine + Separator _ + Number 01 + Suffix _JNT
-         Result Spine_01_JNT
-
-   Number Position
-      Controls where the number is placed.
-
-      After Base:
-         Spine_01_JNT
-
-      At End:
-         Spine_JNT_01
-
-      Before Base:
-         01_Spine_JNT
-         L_01_Spine_JNT if a prefix is used
-
-      Note:
-         Names that start with a number are invalid and will be flagged in
-         the preview.
+Click Reset to clear the entire stack and start with a single fresh
+Search/Replace operation.
 
 
 Search / Replace
 ----------------
 
-Search / Replace finds text in each current object name and replaces it.
+1. Enter the text to find in the Search for field.
 
-Fields:
+2. Enter the replacement text in the Replace with field. Leave blank to
+   delete the matched text.
 
-   Search For
-      Text to find in each current name.
-
-   Replace With
-      Text that replaces the match. Leave blank to remove the matched text.
-
-Options:
-
-   Case Sensitive
-      When enabled, the search must match capitalization exactly.
-
-      Example:
-         Searching for arm will not match Arm if Case Sensitive is enabled.
+3. Toggle any combination of the following options:
 
    Regex
-      Treats Search For as a regular expression.
+   -----
+   Treats the Search for field as a regular expression pattern instead of
+   plain text. Any regex error is shown inline below the fields.
 
-      Useful patterns:
+   Common patterns (hover the Regex toggle in the tool for a quick reference):
 
-         ^L_      matches L_ only at the start
-         _JNT$    matches _JNT only at the end
-         \\d+      matches one or more digits
+      ^        Start of name      ^MTX_ matches only if name begins with MTX_
+      $        End of name        _L$ matches only if name ends with _L
+      .        Any character      M.ge matches Mage, Moge, M_ge
+      *        Zero or more       Lo* matches L, Lo, Loo
+      +        One or more        Lo+ matches Lo, Loo but not L
+      [abc]    Any of these       [LR] matches L or R
+      [0-9]    Range              matches any digit
+      (a|b)    Either a or b      (Mage|Warrior) matches either word
+      \d       Any digit          \d+ matches one or more digits
 
-      Invalid regex patterns are caught and shown in the preview status.
+   Case sensitive
+   --------------
+   When on, the search must match the exact capitalisation.
+   Off by default. Example: searching for 'mage' with Case Sensitive ON
+   will not match 'Mage'.
 
-   Whole Word
-      Only replaces the search text when it appears as a separate word-like
-      token.
+   Whole word
+   ----------
+   Only matches the search term when it appears as a complete word, not
+   as part of a longer word. Word boundaries include underscores, digits,
+   and the start or end of the name.
 
-      Example with search term Arm:
+   Example with search term 'Arm':
+      MTX_Arm_L     -- matches   (Arm is bounded by underscores)
+      MTX_ForeArm_L -- no match  (Arm is part of ForeArm)
 
-         L_Arm_JNT      matches
-         L_ForeArm_JNT  does not match
-
-The preview updates live as you type.
-
-
-Prefix / Suffix Only
---------------------
-
-Prefix / Suffix Only keeps the current object name and adds text before and/or
-after it.
-
-This mode does not use a base name or numbering, so those controls are hidden
-when this mode is active.
-
-Example:
-
-   Current:
-      Spine_01_JNT
-
-   Prefix:
-      FK_
-
-   Suffix:
-      _DRV
-
-   Result:
-      FK_Spine_01_JNT_DRV
+4. The preview updates live as you type.
 
 
-Preview Actions
+Add Prefix
+----------
+
+Enter the text to prepend to every item name. Applied after any
+Search/Replace operations above it in the stack.
+
+
+Add Suffix
+----------
+
+Enter the text to append to every item name. Applied after any operations
+above it in the stack.
+
+
+Number
+------
+
+Appends or prepends a sequential number to each item name.
+
+   - Position (Append / Prepend)
+                       -- whether the number goes at the end or the start
+   - Sep               -- separator between the name and the number
+                          (default underscore). Can be left empty.
+   - Start             -- the first number in the sequence (default 1)
+   - Step              -- how much the number increments per item (default 1)
+   - Padding           -- minimum digit width, zero-padded.
+                          Padding 2 produces 01, 02 ... 10, 11.
+                          Padding 3 produces 001, 002 ... 010, 011.
+
+Numbers are assigned in the order items appear in the master list, which
+is the order they appeared in your selection. The active type filter does
+not affect numbering order.
+
+
+Type Filter Bar
 ---------------
 
-The Rename Settings section includes utility buttons for controlling the
-preview list.
+When the selection contains more than one type of item, a filter bar appears
+below the Options row. Click any filter to narrow the preview list to that
+type only:
 
-   Select All
-      Enables all rows in the table.
+   All     -- show everything (default)
+   .anim   -- show only animation clip assets
+   .prefab -- show only prefab assets
+   GO      -- show only GameObjects
+   Folder  -- show only folders
+   etc.
 
-   Deselect All
-      Disables all rows in the table.
-
-   Changes Only
-      Enables only rows where the preview name is different from the current
-      name and has no error.
-
-   Copy Preview Names
-      Copies all enabled, valid preview names to the clipboard, one per line.
-
-   Refresh Preview
-      Rebuilds the preview table manually. Most fields already update live,
-      but this is useful after scene changes.
+The filter only affects which items are visible and selectable in the preview.
+It does not affect numbering order or items outside the filtered view.
 
 
-Settings
---------
+Preview List
+------------
 
-The tool can save and load its current rename settings.
+The preview list shows all items in the current selection (or the filtered
+subset) with the following columns:
 
-   Save Settings
-      Saves the current mode, prefix, suffix, numbering options, and
-      search/replace options to the Maya user preferences folder.
+   Checkbox  -- include or exclude this item from the Apply operation
+   Icon      -- asset type icon or GameObject icon
+   Type      -- short type label (anim, prefab, GO, Folder, etc.)
+   Original  -- the current name
+   Renamed   -- the name that will be applied. Characters that were added
+                or changed by the operations are shown in blue with a blue
+                background. Characters carried over from the original are
+                shown in green. Red text with a warning icon indicates a
+                name collision within the batch.
 
-   Load Settings
-      Loads the previously saved settings.
+Batch selection buttons:
 
-The settings file is stored in the Maya user preferences directory as:
+   Select All    -- check all visible items
+   Deselect All  -- uncheck all visible items
+   Invert        -- toggle every checkbox
+   Changes Only  -- check only items whose name will change
 
-      KS_MayaSmartRename_prefs.json
+The checkbox in the column header selects or deselects all visible items.
 
-The loaded settings do not store or restore the selected Maya objects. They
-only store the rename options.
+Hover over any control to see a tooltip describing what it does.
 
 
 Applying
 --------
 
-1. Load or add objects to the Selection table.
+1. Review the Renamed column. No changes have been made yet at this point.
 
-2. Choose the rename mode.
+2. Click Apply or press Enter while a text field is focused to apply the
+   rename to all checked items that have a valid new name.
 
-3. Adjust the rename settings.
+3. If any assets are in the batch, a confirmation dialog will appear
+   reminding you that asset renames cannot be undone. GameObject-only
+   batches apply immediately without a dialog.
 
-4. Review the Preview Name and Status columns.
-
-5. Disable any rows you do not want to rename.
-
-6. Click Apply Rename.
-
-7. Confirm the rename dialog.
-
-The rename operation is wrapped in one Maya undo chunk, so one Maya Undo should
-revert the full rename pass.
+4. After applying, the preview refreshes automatically to reflect the
+   new names. The operation stack is preserved so you can continue
+   working on the updated selection.
 
 
-Safety
-------
+Addressables Sync
+-----------------
 
-KS_MayaSmartRename is preview-first. No scene changes are made until Apply
-Rename is pressed.
+If the Addressables package is present in the project, the Sync Addressables
+address checkbox will become active in the Options row. When enabled, renaming
+a registered asset also updates its Addressables address string using the same
+search/replace logic applied to the filename.
 
-Before applying, the tool checks for:
+The sync is reflection-based and requires no changes to Scripting Define
+Symbols or Project Settings. It detects the package automatically on startup
+and logs a confirmation to the Console when found.
 
-- Empty generated names
-- Names that start with a number
-- Invalid Maya characters
-- Duplicate names inside the current batch
-- Names that already exist in the scene
-
-Rows with errors are blocked from applying until fixed or disabled.
+If the address does not contain the original asset name, it is left unchanged.
 
 
 Notes
 -----
 
-- The tool works on Maya scene nodes, not files on disk.
-- It is intended for clean Maya short names, not namespace editing.
-- The preview table uses short object names, but internally stores full DAG
-  paths where available.
-- Deepest objects are renamed first to reduce full-path invalidation issues
-  when renaming hierarchy items.
-- Prefix / Suffix Only mode uses the current object name as the base.
-- Sequential Rename mode assigns numbers only to enabled rows.
-- Search / Replace mode operates on the current name of each item.
-- All renames are applied using maya.cmds.rename.
-- The operation is undoable through Maya because it is wrapped in one undo chunk.
-- Hover over any control in the tool to see a tooltip explaining what it does.
+- Asset renames use AssetDatabase.RenameAsset and cannot be undone via Ctrl+Z.
+  The confirmation dialog is shown before any asset rename is applied.
+- GameObject renames use Undo.RecordObject and are fully undoable.
+- Name collisions within the batch are detected in the preview and blocked
+  from applying. Colliding items are highlighted in red.
+- Folders are included in the rename list and renamed via AssetDatabase.
+- Sub-assets (materials embedded inside FBX files) are not supported for
+  renaming and will not appear in the list.
+- The operation stack resets to a single Search/Replace on domain reload
+  (e.g. after recompiling scripts). It does not persist between sessions.
+- The type filter bar only appears when the selection contains more than
+  one type of item.
+- Hover over any control in the tool to see a tooltip. The Regex and
+  Whole Word toggles include extended explanations and examples.
 
 
 Limitations
 -----------
 
-- The tool currently validates names using a strict Maya-safe naming rule:
-  names must start with a letter or underscore and contain only letters,
-  numbers, and underscores.
-- Namespace workflows are not currently supported.
-- Attribute renaming is not supported.
-- File, asset, and texture renaming outside the Maya scene is not supported.
-- Shape-renaming behavior depends on Maya's default rename behavior and the
-  selected node type.
-- The settings file stores rename options only, not the current object list.
-- Batch name collision detection is conservative and focused on preventing
-  accidental conflicts.
+- Asset renames cannot be undone. There is no undo support at the
+  AssetDatabase level in Unity.
+- Sub-asset renaming is not supported.
+- The operation stack does not persist across domain reloads or Unity
+  restarts.
+- Addressables sync applies the same string replacement to the address
+  that was applied to the filename. Addresses with a completely different
+  format from the filename will not be updated correctly.
+- Duplicate name collision detection is batch-local. It does not check
+  whether a name already exists in the destination folder on disk.
 
 
 Changelog
 ---------
 
-v0.2.3
-  - Added clear tooltips across the UI
-  - Added detailed tooltip explanations for rename modes, numbering, regex,
-    whole-word matching, preview status, and apply behavior
-  - Added row-level preview table tooltips
-
-v0.2.2
-  - Hid Base Name row in Prefix / Suffix Only mode
-  - Hid numbering controls in Prefix / Suffix Only mode to avoid confusion
-
-v0.2.1
-  - Fixed Prefix / Suffix Only mode interaction issue caused by reusing widgets
-    across multiple layouts
-  - Prefix and suffix fields now remain editable in Prefix / Suffix Only mode
-
-v0.2.0
-  - Added Search / Replace mode
-  - Added Prefix / Suffix Only mode
-  - Added Save Settings and Load Settings
-  - Added Copy Preview Names
-  - Added Select Rows in Maya
-  - Shared validation and duplicate detection across all modes
-
-v0.1.2
-  - Added safer Maya short-name validation
-  - Prevented preview crashes from invalid characters or names starting with
-    numbers
-  - Widened Start, Step, Padding, and Separator fields
-
-v0.1.1
-  - Updated defaults to match common rigging convention:
-    Spine_01_JNT
-
-v0.1.0
+v1.0
   - Initial release
-  - Sequential Rename mode
-  - Selection table
-  - Manual ordering
-  - Live preview
-  - Apply Rename in one Maya undo chunk
+  - Search/Replace with regex, case-sensitive, and whole-word options
+  - Operation stack: Search/Replace, Add Prefix, Add Suffix, Number
+  - Live two-column preview with per-item checkboxes
+  - Changed characters highlighted in blue, unchanged in green in the
+    Renamed column
+  - Type filter bar dynamically built from selection
+  - Folder support
+  - Right-click context menus in Project window and Hierarchy
+  - Enter key triggers Apply when a text field is focused
+  - Addressables address sync via reflection, no project settings required
+  - Asset rename confirmation dialog
+  - Batch collision detection
+  - Styles rebuilt on domain reload
+  - Tooltips on every control, including regex reference table and
+    whole-word examples on the relevant toggles
 
 
 Author
